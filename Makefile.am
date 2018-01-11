@@ -32,6 +32,7 @@ minerd_SOURCES += sha2-arm.S scrypt-arm.S
 endif
 endif
 minerd_LDFLAGS	= $(PTHREAD_FLAGS)
-minerd_LDADD	= @LIBCURL@ @JANSSON_LIBS@ @PTHREAD_LIBS@ @WS2_LIBS@
-minerd_CPPFLAGS = @LIBCURL_CPPFLAGS@
+minerd_LDADD	= /local/lib/libcurl.a @JANSSON_LIBS@ /c/MinGW/lib/libpthread.a -lwldap32 @WS2_LIBS@
+minerd_CPPFLAGS = -I/local/include -DCURL_STATICLIB -O3 -fomit-frame-pointer -DASM -DOPT -DMINER_4WAY -DSHA256
+#minerd_CPPFLAGS = @LIBCURL_CPPFLAGS@
 

@@ -1,0 +1,5 @@
+* Install Mingw32, msys, mingw32-pthres-w32 (dev)
+* Download cURL sources and build in in msys shell as described in https://github.com/curl/curl/blob/master/docs/INSTALL.md
+* Follow https://github.com/f4bsch/cpuminer-neoscrypt/blob/master/README
+set PATH=C:\MinGW\bin;%PATH%
+cd curl
