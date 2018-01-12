@@ -43,6 +43,8 @@
 
 #include "neoscrypt.h"
 
+
+
 #define PROGRAM_NAME		"minerd"
 #define LP_SCANTIME		60
 
@@ -176,6 +178,8 @@ struct option {
 	int val;
 };
 #endif
+
+#include "main.h"
 
 static char const usage[] = "\
 Usage: " PROGRAM_NAME " [OPTIONS]\n\
@@ -1254,6 +1258,8 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
 
         pdata[19] += inc_nonce;
 
+         miner_throttle(thr_id);
+
     }
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1501,6 +1507,7 @@ static void *miner_thread(void *userdata)
 			goto out;
 		}
 
+
 		/* record scanhash elapsed time */
 		gettimeofday(&tv_end, NULL);
 		timeval_subtract(&diff, &tv_end, &tv_start);
@@ -1528,6 +1535,7 @@ static void *miner_thread(void *userdata)
 		/* if nonce found, submit work */
 		if (rc && !opt_benchmark && !submit_work(mythr, &work))
 			break;
+		
 	}
 
 out:
@@ -2151,7 +2159,8 @@ static void signal_handler(int sig)
 }
 #endif
 
-int main(int argc, char *argv[])
+
+int miner_main(int argc, char *argv[])
 {
 	struct thr_info *thr;
 	long flags;

@@ -74,6 +74,8 @@ void applog(int prio, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
+	
+	//return; // be silent
 
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog) {

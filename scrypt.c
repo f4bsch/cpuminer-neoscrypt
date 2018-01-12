@@ -1,3 +1,4 @@
+#if 0
 /*
  * Copyright 2009 Colin Percival, 2011 ArtForz, 2011-2013 pooler
  * All rights reserved.
@@ -754,3 +755,4 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata, unsigned char *scratchbuf,
 	pdata[19] = n;
 	return 0;
 }
+#endif
