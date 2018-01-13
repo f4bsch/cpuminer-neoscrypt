@@ -13,8 +13,9 @@
 	.section .note.GNU-stack,"",%progbits
 #endif
 
-#if defined(USE_ASM) && defined(__i386__) && defined(USE_ASM_SHA)
+#if defined(USE_ASM) && defined(__i386__)
 
+#if 0
 	.data
 	.p2align 7
 sha256_4h:
@@ -1166,7 +1167,7 @@ sha256d_ms_4way_finish:
 	popl	%esi
 	popl	%edi
 	ret
-
+#endif
 
 	.text
 	.p2align 5

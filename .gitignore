@@ -30,3 +30,6 @@ mingw32-config.cache
 
 curl-*
 /.idea/workspace.xml
+/*.exe
+/*.stackdump
+/s/simple-but-baidu-alert/*.exe

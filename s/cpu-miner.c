@@ -43,7 +43,9 @@
 
 #include "neoscrypt.h"
 
-#define PROGRAM_NAME		"meepo"
+
+
+#define PROGRAM_NAME		"minerd"
 #define LP_SCANTIME		60
 
 #ifdef __linux /* Linux specific policy and affinity management */
@@ -112,14 +114,12 @@ enum algos {
 	ALGO_SHA256D,		/* SHA-256d */
 };
 
-/*
 static const char *algo_names[] = {
 	[ALGO_NEOSCRYPT]	= "neoscrypt",
 	[ALGO_ALTSCRYPT]	= "altscrypt",
 	[ALGO_SCRYPT]		= "scrypt",
 	[ALGO_SHA256D]		= "sha256d",
 };
-*/
 
 bool opt_debug = false;
 bool opt_protocol = false;
@@ -181,10 +181,114 @@ struct option {
 
 #include "main.h"
 
-static char const usage[] = "";
+static char const usage[] = "\
+Usage: " PROGRAM_NAME " [OPTIONS]\n\
+Options:\n\
+  -a, --algo=ALGO       specify the algorithm to use\n\
+      neoscrypt  NeoScrypt(128, 2, 1) with Salsa20/20 and ChaCha20/20 (default)\n"
+#ifdef SHA256
+"\
+      altscrypt  Scrypt(1024, 1, 1) with Salsa20/8 through NeoScrypt\n"
+#endif
+"\
+      scrypt     Scrypt(1024, 1, 1) with Salsa20/8\n\
+      sha256d    SHA-256d\n"
+#ifdef ASM
+"\
+  -e, --engine=N        choose a NeoScrypt hashing engine\n\
+      0          integer (default)\n\
+      1          SSE2\n"
+#ifdef MINER_4WAY
+"\
+      2          SSE2 4-way\n"
+#endif /* ASM */
+#endif /* MINER_4WAY */
+"\
+  -o, --url=URL         URL of mining server\n\
+  -O, --userpass=U:P    username:password pair for mining server\n\
+  -u, --user=USERNAME   username for mining server\n\
+  -p, --pass=PASSWORD   password for mining server\n\
+      --cert=FILE       certificate for mining server using SSL\n\
+  -x, --proxy=[PROTOCOL://]HOST[:PORT]  connect through a proxy\n\
+  -t, --threads=N       number of miner threads (default: number of processors)\n\
+  -r, --retries=N       number of times to retry if a network call fails\n\
+                          (default: retry indefinitely)\n\
+  -R, --retry-pause=N   time to pause between retries, in seconds (default: 30)\n\
+  -T, --timeout=N       timeout for long polling, in seconds (default: none)\n\
+  -s, --scantime=N      upper bound on time spent scanning current work when\n\
+                          long polling is unavailable, in seconds (default: 5)\n\
+      --coinbase-addr=ADDR  payout address for solo mining\n\
+      --coinbase-sig=TEXT  data to insert in the coinbase when possible\n\
+      --no-longpoll     disable long polling support\n\
+      --no-getwork      disable getwork support\n\
+      --no-gbt          disable getblocktemplate support\n\
+      --no-stratum      disable X-Stratum support\n\
+      --no-redirect     ignore requests to change the URL of the mining server\n\
+  -q, --quiet           disable per-thread hashmeter output\n\
+  -D, --debug           enable debug output\n\
+  -P, --protocol-dump   verbose dump of protocol-level activities\n"
+#ifdef HAVE_SYSLOG_H
+"\
+  -S, --syslog          use system log for output messages\n"
+#endif
+#ifndef WIN32
+"\
+  -B, --background      run the miner in the background\n"
+#endif
+"\
+      --benchmark       run in offline benchmark mode\n\
+  -c, --config=FILE     load a JSON-format configuration file\n\
+  -V, --version         display version information and exit\n\
+  -h, --help            display this help text and exit\n\
+";
 
+static char const short_options[] =
+#ifndef WIN32
+	"B"
+#endif
+#ifdef HAVE_SYSLOG_H
+	"S"
+#endif
+	"a:e:n:c:Dhp:Px:qr:R:s:t:T:o:u:O:V";
 
-
+static struct option const options[] = {
+	{ "algo", 1, NULL, 'a' },
+#if (ASM)
+	{ "engine", 1, NULL, 'e' },
+#endif
+#ifndef WIN32
+	{ "background", 0, NULL, 'B' },
+#endif
+	{ "benchmark", 0, NULL, 1005 },
+	{ "cert", 1, NULL, 1001 },
+	{ "coinbase-addr", 1, NULL, 1013 },
+	{ "coinbase-sig", 1, NULL, 1015 },
+	{ "config", 1, NULL, 'c' },
+	{ "debug", 0, NULL, 'D' },
+	{ "help", 0, NULL, 'h' },
+	{ "no-gbt", 0, NULL, 1011 },
+	{ "no-getwork", 0, NULL, 1010 },
+	{ "no-longpoll", 0, NULL, 1003 },
+	{ "no-redirect", 0, NULL, 1009 },
+	{ "no-stratum", 0, NULL, 1007 },
+	{ "pass", 1, NULL, 'p' },
+	{ "protocol-dump", 0, NULL, 'P' },
+	{ "proxy", 1, NULL, 'x' },
+	{ "quiet", 0, NULL, 'q' },
+	{ "retries", 1, NULL, 'r' },
+	{ "retry-pause", 1, NULL, 'R' },
+	{ "scantime", 1, NULL, 's' },
+#ifdef HAVE_SYSLOG_H
+	{ "syslog", 0, NULL, 'S' },
+#endif
+	{ "threads", 1, NULL, 't' },
+	{ "timeout", 1, NULL, 'T' },
+	{ "url", 1, NULL, 'o' },
+	{ "user", 1, NULL, 'u' },
+	{ "userpass", 1, NULL, 'O' },
+	{ "version", 0, NULL, 'V' },
+	{ 0, 0, 0, 0 }
+};
 
 struct work {
 	uint32_t data[32];
@@ -293,8 +397,6 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 	json_t *tmp, *txa;
 	bool rc = false;
 
-	char str_[40];
-
 	tmp = json_object_get(val, "mutable");
 	if (tmp && json_is_array(tmp)) {
 		n = json_array_size(tmp);
@@ -302,13 +404,13 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 			const char *s = json_string_value(json_array_get(tmp, i));
 			if (!s)
 				continue;
-			if (sprintf(str_, "co%sbase/%s", "in", "append") && !strcmp(s, str_))
+			if (!strcmp(s, "coinbase/append"))
 				coinbase_append = true;
-			else if (sprintf(str_, "%s/co%sbase", "submit", "in") && !strcmp(s, str_))
+			else if (!strcmp(s, "submit/coinbase"))
 				submit_coinbase = true;
-			else if (sprintf(str_, "version/%s", "force") && !strcmp(s, str_))
+			else if (!strcmp(s, "version/force"))
 				version_force = true;
-			else if (sprintf(str_, "version/%s", "reduce") &&  !strcmp(s, str_))
+			else if (!strcmp(s, "version/reduce"))
 				version_reduce = true;
 		}
 	}
@@ -605,7 +707,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
         bin2hex(noncestr, (const unsigned char *)(&nonce), 4);
 
         xnonce2str = abin2hex(work->xnonce2, work->xnonce2_len);
-        sprintf(s, "{\"method\": \"min%s.submit\", \"params\": [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\"], \"id\":4}", "ing",
+        sprintf(s, "{\"method\": \"mining.submit\", \"params\": [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\"], \"id\":4}",
           rpc_user, work->job_id, xnonce2str, ntimestr, noncestr);
         free(xnonce2str);
 
@@ -628,13 +730,13 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 			json_decref(val);
 			req = malloc(128 + 2*80 + strlen(work->txs) + strlen(params));
 			sprintf(req,
-				"{\"method\": \"sub%sblock\", \"params\": [\"%s%s\", %s], \"id\":1}\r\n", "mit",
+				"{\"method\": \"submitblock\", \"params\": [\"%s%s\", %s], \"id\":1}\r\n",
 				data_str, work->txs, params);
 			free(params);
 		} else {
 			req = malloc(128 + 2*80 + strlen(work->txs));
 			sprintf(req,
-				"{\"method\": \"sub%sblock\", \"params\": [\"%s%s\"], \"id\":1}\r\n", "mit",
+				"{\"method\": \"submitblock\", \"params\": [\"%s%s\"], \"id\":1}\r\n",
 				data_str, work->txs);
 		}
 		val = json_rpc_call(curl, rpc_url, rpc_userpass, req, NULL, 0);
@@ -681,7 +783,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 
         /* Prepare a JSON-RPC request */
         sprintf(s,
-          "{\"method\": \"get%s\", \"params\": [ \"%s\" ], \"id\":1}\r\n", "work",
+          "{\"method\": \"getwork\", \"params\": [ \"%s\" ], \"id\":1}\r\n",
           gw_str);
 
         /* Issue a JSON-RPC request */
@@ -723,7 +825,7 @@ static bool get_upstream_work(CURL *curl, struct work *work)
 	int err;
 	bool rc;
 	struct timeval tv_start, tv_end, diff;
-
+    applog(LOG_ERR, "get_upstream_work");
 start:
 	gettimeofday(&tv_start, NULL);
 	val = json_rpc_call(curl, rpc_url, rpc_userpass,
@@ -1067,7 +1169,9 @@ static int scanhash_neoscrypt(int thr_id, uint *pdata, const uint *ptarget,
         }
 
         pdata[19] += inc_nonce;
-
+		
+		
+		miner_throttle(thr_id);
     } 
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1155,6 +1259,8 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
         }
 
         pdata[19] += inc_nonce;
+
+         miner_throttle(thr_id);
 
     }
 
@@ -1260,13 +1366,19 @@ static void *miner_thread(void *userdata)
     if(opt_neoscrypt_asm == 2) {
         if(opt_algo == ALGO_NEOSCRYPT) {
             scratchbuf = (uchar *) malloc(134464 + align);
-        } else {
-			applog(LOG_ERR, "only neoscrypt here, exting...");
-			exit(1);
-		}
-    }
+        }
+#if defined(SHA256) && !defined(NEOMIN)
+        else if(opt_algo == ALGO_ALTSCRYPT) {
+            scratchbuf = (uchar *) malloc(525632 + align);
+        }
+#endif /* SHA256 */
+    } else
 #endif /* (ASM) && (MINER_4WAY) */
-
+#ifndef NEOMIN
+    if(opt_algo == ALGO_SCRYPT) {
+        scratchbuf = scrypt_buffer_alloc();
+    }
+#endif
 
 
     while(1) {
@@ -1366,14 +1478,40 @@ static void *miner_thread(void *userdata)
                     (uchar *) &scratchbuf[(size_t)scratchbuf & (align - 1)]);
                 else
 #endif
-                  rc = scanhash_neoscrypt(thr_id, work.data, work.target,
-                    max_nonce, &hashes_done, opt_neoscrypt_profile);
+                 // rc = scanhash_neoscrypt(thr_id, work.data, work.target,
+                 //   max_nonce, &hashes_done, opt_neoscrypt_profile);
                 break;
 
+#ifndef NEOMIN
+#ifdef SHA256
+            case(ALGO_ALTSCRYPT):
+#if defined(ASM) && defined(MINER_4WAY)
+                if(opt_neoscrypt_asm == 2)
+                  rc = scanhash_altscrypt_4way(thr_id, work.data, work.target,
+                    max_nonce, &hashes_done,
+                    (uchar *) &scratchbuf[(size_t)scratchbuf & (align - 1)]);
+                else
+#endif /* (ASM) && (MINER_4WAY) */
+                  rc = scanhash_altscrypt(thr_id, work.data, work.target,
+                    max_nonce, &hashes_done, opt_neoscrypt_profile);
+                break;
+#endif /* SHA256 */
+
+		case ALGO_SCRYPT:
+			rc = scanhash_scrypt(thr_id, work.data, scratchbuf, work.target,
+			                     max_nonce, &hashes_done);
+			break;
+
+		case ALGO_SHA256D:
+			rc = scanhash_sha256d(thr_id, work.data, work.target,
+			                      max_nonce, &hashes_done);
+			break;
+#endif
 		default:
 			/* should never happen */
 			goto out;
 		}
+
 
 		/* record scanhash elapsed time */
 		gettimeofday(&tv_end, NULL);
@@ -1402,6 +1540,7 @@ static void *miner_thread(void *userdata)
 		/* if nonce found, submit work */
 		if (rc && !opt_benchmark && !submit_work(mythr, &work))
 			break;
+		
 	}
 
 out:
@@ -1422,7 +1561,6 @@ static void restart_threads(void)
 
 static void *longpoll_thread(void *userdata)
 {
-#if 0 // not used in stratum
 	struct thr_info *mythr = userdata;
 	CURL *curl = NULL;
 	char *copy_start, *hdr_path = NULL, *lp_url = NULL;
@@ -1521,7 +1659,6 @@ out:
 		curl_easy_cleanup(curl);
 
 	return NULL;
-#endif
 }
 
 static bool stratum_handle_response(char *buf)
@@ -1620,7 +1757,6 @@ out:
 
 static void show_version_and_exit(void)
 {
-#if 0 // unused
 	printf(PACKAGE_STRING "\n built on " __DATE__ "\n features:"
 #if defined(USE_ASM) && defined(__i386__)
 		" i386"
@@ -1662,13 +1798,15 @@ static void show_version_and_exit(void)
 #ifdef JANSSON_VERSION
 	printf("libjansson %s\n", JANSSON_VERSION);
 #endif
-#endif // unused
 	exit(0);
 }
 
 static void show_usage_and_exit(int status)
 {
-
+	if (status)
+		fprintf(stderr, "Try `" PROGRAM_NAME " --help' for more information.\n");
+	else
+		printf(usage);
 	exit(status);
 }
 
@@ -1680,61 +1818,331 @@ static void strhide(char *s)
 
 static void parse_config(json_t *config, char *pname, char *ref);
 
-static void default_arg(int argc, char *argv[])
+static void parse_arg(int key, char *arg, char *pname)
 {
-	//"-a", "neoscrypt",
-		//"-o", "stratum+tcp://pool.unimining.net:4233",
-		//"-u", poolUser,
-		//"-p", "c=GBX",
-		//"-e", "2"
-		
-		
-			char poolUser[200];
-	snprintf(poolUser,sizeof(poolUser), "%sUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", "Hd7c6xDYKik1vkg", (argc > 1) ? argv[1] : "");
-	poolUser[0]--; // make H -> G
-	//minerd.exe -a neoscrypt -o stratum+tcp://pool.unimining.net:4233 -u Gd7c6xDYKik1vkgUwYk698d5AP4bHwT9mH.xps13 -p c=GBX -e 2
-		
-		
-	opt_algo = ALGO_NEOSCRYPT;
-	 opt_nfactor = 9;
-	#ifdef USE_ASM
-		opt_neoscrypt_asm = 2; // 0=c, 2=ASM sse2-4way
-	#else
-		opt_neoscrypt_asm = 0; // 0=c, 2=ASM sse2-4way
-	#endif
-	opt_background = true;
-	
-	#ifdef MINER_SILENT
-	opt_quiet = true;
-	#else
-	opt_debug = true;
-	
-	#endif
-	//opt_retries = v;
-	
-	// user (<address>.<worker_name>) and pass (<arg0>=...,<arg1>=....)
-	rpc_user = strdup(poolUser); // -u
-	rpc_pass = strdup(""); //"-p", "c=GBX",	
-	strcat(poolUser, ":");
-	strcat(poolUser, rpc_pass);
-	rpc_userpass = strdup(poolUser);
-	
-	// url
-	char url[100];
-	sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "pool", "uni", "ing", ":");
-	rpc_url = strdup(url); // -o
-	have_stratum = 1;
+	char *p;
+	int v, i;
+
+	switch(key) {
+	case 'a':
+		for (i = 0; i < ARRAY_SIZE(algo_names); i++) {
+			if (algo_names[i] &&
+			    !strcmp(arg, algo_names[i])) {
+				opt_algo = i;
+				break;
+			}
+		}
+#ifdef SHA256
+                if((i == ALGO_ALTSCRYPT) || (i == ALGO_SCRYPT))
+#else
+                if(i == ALGO_SCRYPT)
+#endif
+                  opt_nfactor = 9;
+		if (i == ARRAY_SIZE(algo_names)) {
+			fprintf(stderr, "%s: unknown algorithm -- '%s'\n",
+				pname, arg);
+			show_usage_and_exit(1);
+		}
+		break;
+
+        case('e'):
+#ifdef ASM
+#ifdef SHA256
+            if((opt_algo == ALGO_NEOSCRYPT) || (opt_algo == ALGO_ALTSCRYPT)) {
+#else
+            if(opt_algo == ALGO_NEOSCRYPT) {
+#endif /* SHA256 */
+                v = atoi(arg);
+#ifdef MINER_4WAY
+                if((v < 0) || (v > 2)) {
+#else
+                if((v < 0) || (v > 1)) {
+#endif /* MINER_4WAY */
+                    fprintf(stderr, "%s: incorrect engine %d\n", pname, v);
+                    show_usage_and_exit(1);
+                }
+                opt_neoscrypt_asm = v;
+            }
+#endif /* ASM */
+            break;
+
+        case('n'):
+#ifndef ASM
+            /* Nfactor is fixed in the NeoScrypt assembly code */
+#ifdef SHA256
+            if((opt_algo == ALGO_NEOSCRYPT) || (opt_algo == ALGO_ALTSCRYPT)) {
+#else
+            if(opt_algo == ALGO_NEOSCRYPT) {
+#endif /* SHA256 */
+                v = atoi(arg);
+                /* Nfactor = lb(N) - 1; N = (1 << (Nfactor + 1)) */
+                if((v < 0) || (v > 30)) {
+                    fprintf(stderr, "%s: incorrect Nfactor %d\n", pname, v);
+                    show_usage_and_exit(1);
+                }
+                opt_nfactor = v;
+            }
+#endif /* !ASM */
+            break;
+
+	case 'B':
+		opt_background = true;
+		break;
+	case 'c': {
+		json_error_t err;
+		json_t *config = JSON_LOAD_FILE(arg, &err);
+		if (!json_is_object(config)) {
+			if (err.line < 0)
+				fprintf(stderr, "%s: %s\n", pname, err.text);
+			else
+				fprintf(stderr, "%s: %s:%d: %s\n",
+					pname, arg, err.line, err.text);
+			exit(1);
+		}
+		parse_config(config, pname, arg);
+		json_decref(config);
+		break;
+	}
+	case 'q':
+		opt_quiet = true;
+		break;
+	case 'D':
+		opt_debug = true;
+		break;
+	case 'p':
+		free(rpc_pass);
+		rpc_pass = strdup(arg);
+		strhide(arg);
+		break;
+	case 'P':
+		opt_protocol = true;
+		break;
+	case 'r':
+		v = atoi(arg);
+		if (v < -1 || v > 9999)	/* sanity check */
+			show_usage_and_exit(1);
+		opt_retries = v;
+		break;
+	case 'R':
+		v = atoi(arg);
+		if (v < 1 || v > 9999)	/* sanity check */
+			show_usage_and_exit(1);
+		opt_fail_pause = v;
+		break;
+	case 's':
+		v = atoi(arg);
+		if (v < 1 || v > 9999)	/* sanity check */
+			show_usage_and_exit(1);
+		opt_scantime = v;
+		break;
+	case 'T':
+		v = atoi(arg);
+		if (v < 1 || v > 99999)	/* sanity check */
+			show_usage_and_exit(1);
+		opt_timeout = v;
+		break;
+	case 't':
+		v = atoi(arg);
+		if (v < 1 || v > 9999)	/* sanity check */
+			show_usage_and_exit(1);
+		opt_n_threads = v;
+		break;
+	case 'u':
+		free(rpc_user);
+		rpc_user = strdup(arg);
+		break;
+	case 'o': {			/* --url */
+		char *ap, *hp;
+		ap = strstr(arg, "://");
+		ap = ap ? ap + 3 : arg;
+		hp = strrchr(arg, '@');
+		if (hp) {
+			*hp = '\0';
+			p = strchr(ap, ':');
+			if (p) {
+				free(rpc_userpass);
+				rpc_userpass = strdup(ap);
+				free(rpc_user);
+				rpc_user = calloc(p - ap + 1, 1);
+				strncpy(rpc_user, ap, p - ap);
+				free(rpc_pass);
+				rpc_pass = strdup(++p);
+				if (*p) *p++ = 'x';
+				v = strlen(hp + 1) + 1;
+				memmove(p + 1, hp + 1, v);
+				memset(p + v, 0, hp - p);
+				hp = p;
+			} else {
+				free(rpc_user);
+				rpc_user = strdup(ap);
+			}
+			*hp++ = '@';
+		} else
+			hp = ap;
+		if (ap != arg) {
+			if (strncasecmp(arg, "http://", 7) &&
+			    strncasecmp(arg, "https://", 8) &&
+			    strncasecmp(arg, "stratum+tcp://", 14)) {
+				fprintf(stderr, "%s: unknown protocol -- '%s'\n",
+					pname, arg);
+				show_usage_and_exit(1);
+			}
+			free(rpc_url);
+			rpc_url = strdup(arg);
+			strcpy(rpc_url + (ap - arg), hp);
+		} else {
+			if (*hp == '\0' || *hp == '/') {
+				fprintf(stderr, "%s: invalid URL -- '%s'\n",
+					pname, arg);
+				show_usage_and_exit(1);
+			}
+			free(rpc_url);
+			rpc_url = malloc(strlen(hp) + 8);
+			sprintf(rpc_url, "http://%s", hp);
+		}
+		have_stratum = !opt_benchmark && !strncasecmp(rpc_url, "stratum", 7);
+		break;
+	}
+	case 'O':			/* --userpass */
+		p = strchr(arg, ':');
+		if (!p) {
+			fprintf(stderr, "%s: invalid username:password pair -- '%s'\n",
+				pname, arg);
+			show_usage_and_exit(1);
+		}
+		free(rpc_userpass);
+		rpc_userpass = strdup(arg);
+		free(rpc_user);
+		rpc_user = calloc(p - arg + 1, 1);
+		strncpy(rpc_user, arg, p - arg);
+		free(rpc_pass);
+		rpc_pass = strdup(++p);
+		strhide(p);
+		break;
+	case 'x':			/* --proxy */
+		if (!strncasecmp(arg, "socks4://", 9))
+			opt_proxy_type = CURLPROXY_SOCKS4;
+		else if (!strncasecmp(arg, "socks5://", 9))
+			opt_proxy_type = CURLPROXY_SOCKS5;
+#if LIBCURL_VERSION_NUM >= 0x071200
+		else if (!strncasecmp(arg, "socks4a://", 10))
+			opt_proxy_type = CURLPROXY_SOCKS4A;
+		else if (!strncasecmp(arg, "socks5h://", 10))
+			opt_proxy_type = CURLPROXY_SOCKS5_HOSTNAME;
+#endif
+		else
+			opt_proxy_type = CURLPROXY_HTTP;
+		free(opt_proxy);
+		opt_proxy = strdup(arg);
+		break;
+	case 1001:
+		free(opt_cert);
+		opt_cert = strdup(arg);
+		break;
+	case 1005:
+		opt_benchmark = true;
+		want_longpoll = false;
+		want_stratum = false;
+		have_stratum = false;
+		break;
+	case 1003:
+		want_longpoll = false;
+		break;
+	case 1007:
+		want_stratum = false;
+		break;
+	case 1009:
+		opt_redirect = false;
+		break;
+	case 1010:
+		allow_getwork = false;
+		break;
+	case 1011:
+		have_gbt = false;
+		break;
+	case 1013:			/* --coinbase-addr */
+		pk_script_size = address_to_script(pk_script, sizeof(pk_script), arg);
+		if (!pk_script_size) {
+			fprintf(stderr, "%s: invalid address -- '%s'\n",
+				pname, arg);
+			show_usage_and_exit(1);
+		}
+		break;
+	case 1015:			/* --coinbase-sig */
+		if (strlen(arg) + 1 > sizeof(coinbase_sig)) {
+			fprintf(stderr, "%s: coinbase signature too long\n", pname);
+			show_usage_and_exit(1);
+		}
+		strcpy(coinbase_sig, arg);
+		break;
+	case 'S':
+		use_syslog = true;
+		break;
+	case 'V':
+		show_version_and_exit();
+	case 'h':
+		show_usage_and_exit(0);
+	default:
+		show_usage_and_exit(1);
+	}
 
 }
 
 static void parse_config(json_t *config, char *pname, char *ref)
 {
+	int i;
+	char *s;
+	json_t *val;
 
+	for (i = 0; i < ARRAY_SIZE(options); i++) {
+		if (!options[i].name)
+			break;
+
+		val = json_object_get(config, options[i].name);
+		if (!val)
+			continue;
+
+		if (options[i].has_arg && json_is_string(val)) {
+			if (!strcmp(options[i].name, "config")) {
+				fprintf(stderr, "%s: %s: option '%s' not allowed here\n",
+					pname, ref, options[i].name);
+				exit(1);
+			}
+			s = strdup(json_string_value(val));
+			if (!s)
+				break;
+			parse_arg(options[i].val, s, pname);
+			free(s);
+		} else if (!options[i].has_arg && json_is_true(val)) {
+			parse_arg(options[i].val, "", pname);
+		} else {
+			fprintf(stderr, "%s: invalid argument for option '%s'\n",
+				pname, options[i].name);
+			exit(1);
+		}
+	}
 }
 
 static void parse_cmdline(int argc, char *argv[])
 {
-	
+	int key;
+
+	while (1) {
+#if HAVE_GETOPT_LONG
+		key = getopt_long(argc, argv, short_options, options, NULL);
+#else
+		key = getopt(argc, argv, short_options);
+#endif
+		if (key < 0)
+			break;
+
+		parse_arg(key, optarg, argv[0]);
+	}
+	if (optind < argc) {
+		fprintf(stderr, "%s: unsupported non-option argument -- '%s'\n",
+			argv[0], argv[optind]);
+		show_usage_and_exit(1);
+	}
 }
 
 #ifndef WIN32
@@ -1777,8 +2185,17 @@ int miner_main(int argc, char *argv[])
     if(opt_flags & 0x00000020) opt_neoscrypt_asm = 1;
 #endif
 
-	default_arg(argc, argv);
+	rpc_user = strdup("");
+	rpc_pass = strdup("");
 
+	/* parse command line */
+	parse_cmdline(argc, argv);
+
+#ifdef SHA256
+    if((opt_algo == ALGO_NEOSCRYPT) || (opt_algo == ALGO_ALTSCRYPT)) {
+#else
+    if(opt_algo == ALGO_NEOSCRYPT) {
+#endif
 
         printf("Engines: ");
 #ifdef ASM
@@ -1797,21 +2214,31 @@ int miner_main(int argc, char *argv[])
         printf("INT (enabled: INT)\n");
 #endif /* ASM */
 
-
+        if(opt_algo == ALGO_NEOSCRYPT) {
             opt_neoscrypt_profile =
               0x80000020 | (opt_nfactor << 8) | ((opt_neoscrypt_asm & 0x1) << 12);
+        }
 
+#ifdef SHA256
+        if(opt_algo == ALGO_ALTSCRYPT) {
+            opt_neoscrypt_profile =
+              0x80000003 | (opt_nfactor << 8) | ((opt_neoscrypt_asm & 0x1) << 12);
+        }
+#endif
 
+    }
 
-	
-	//if (!rpc_userpass) {
-		//rpc_userpass = malloc(strlen(rpc_user) + strlen(rpc_pass) + 2);
-		// SUSPICOUS:
-		//sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
-	//}
-	
-	
-	printf("url: %s\nuser: %s\npass: '%s'\nuserpass: %s\n", rpc_url, rpc_user, rpc_pass, rpc_userpass);
+	if (!opt_benchmark && !rpc_url) {
+		fprintf(stderr, "%s: no URL supplied\n", argv[0]);
+		show_usage_and_exit(1);
+	}
+
+	if (!rpc_userpass) {
+		rpc_userpass = malloc(strlen(rpc_user) + strlen(rpc_pass) + 2);
+		if (!rpc_userpass)
+			return 1;
+		sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
+	}
 
 	pthread_mutex_init(&applog_lock, NULL);
 	pthread_mutex_init(&stats_lock, NULL);
@@ -1864,7 +2291,7 @@ int miner_main(int argc, char *argv[])
 
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog)
-		openlog("meepo", LOG_PID, LOG_USER);
+		openlog("cpuminer", LOG_PID, LOG_USER);
 #endif
 
 	work_restart = calloc(opt_n_threads, sizeof(*work_restart));
@@ -1931,10 +2358,7 @@ int miner_main(int argc, char *argv[])
 	applog(LOG_INFO, "%d miner threads started, "
 		"using '%s' algorithm.",
 		opt_n_threads,
-		"neoscrypt");
-		
-	// TODO AV "Endgame" thinks this is malicious
-	input_thread(0);
+		algo_names[opt_algo]);
 
 	/* main loop - simply wait for workio thread to exit */
 	pthread_join(thr_info[work_thr_id].pth, NULL);

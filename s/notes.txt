@@ -1,0 +1,6 @@
+Baidu has false-positive
+AVG complains about sha2-x86.S
+
+
+Finish:
+searh in binary for: mining, coin, stratum

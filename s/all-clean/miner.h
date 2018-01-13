@@ -135,8 +135,8 @@ static inline void le32enc(void *pp, uint32_t x)
 void sha256_init(uint32_t *state);
 void sha256_transform(uint32_t *state, const uint32_t *block, int swap);
 void sha256d(unsigned char *hash, const unsigned char *data, int len);
- 
-#if defined(USE_ASM) && defined(USE_ASM_SHA)
+
+#ifdef USE_ASM
 #if defined(__ARM_NEON__) || defined(__i386__) || defined(__x86_64__)
 #define HAVE_SHA256_4WAY 1
 int sha256_use_4way();
