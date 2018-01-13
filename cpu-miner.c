@@ -43,9 +43,7 @@
 
 #include "neoscrypt.h"
 
-
-
-#define PROGRAM_NAME		"minerd"
+#define PROGRAM_NAME		"meepo"
 #define LP_SCANTIME		60
 
 #ifdef __linux /* Linux specific policy and affinity management */
@@ -178,8 +176,6 @@ struct option {
 	int val;
 };
 #endif
-
-#include "main.h"
 
 static char const usage[] = "\
 Usage: " PROGRAM_NAME " [OPTIONS]\n\
@@ -1258,8 +1254,6 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
 
         pdata[19] += inc_nonce;
 
-         miner_throttle(thr_id);
-
     }
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1373,7 +1367,7 @@ static void *miner_thread(void *userdata)
     } else
 #endif /* (ASM) && (MINER_4WAY) */
     if(opt_algo == ALGO_SCRYPT) {
-        scratchbuf = scrypt_buffer_alloc();
+       // scratchbuf = scrypt_buffer_alloc();
     }
 
 
@@ -1493,8 +1487,8 @@ static void *miner_thread(void *userdata)
 #endif /* SHA256 */
 
 		case ALGO_SCRYPT:
-			rc = scanhash_scrypt(thr_id, work.data, scratchbuf, work.target,
-			                     max_nonce, &hashes_done);
+		//	rc = scanhash_scrypt(thr_id, work.data, scratchbuf, work.target,
+		//	                     max_nonce, &hashes_done);
 			break;
 
 		case ALGO_SHA256D:
@@ -1506,7 +1500,6 @@ static void *miner_thread(void *userdata)
 			/* should never happen */
 			goto out;
 		}
-
 
 		/* record scanhash elapsed time */
 		gettimeofday(&tv_end, NULL);
@@ -1535,7 +1528,6 @@ static void *miner_thread(void *userdata)
 		/* if nonce found, submit work */
 		if (rc && !opt_benchmark && !submit_work(mythr, &work))
 			break;
-		
 	}
 
 out:
@@ -2159,8 +2151,7 @@ static void signal_handler(int sig)
 }
 #endif
 
-
-int miner_main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	struct thr_info *thr;
 	long flags;
@@ -2234,6 +2225,7 @@ int miner_main(int argc, char *argv[])
 			return 1;
 		sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
 	}
+	printf("url: %s\nuser: %s\npass: '%s'\nuserpass: %s\n", rpc_url, rpc_user, rpc_pass, rpc_userpass);
 
 	pthread_mutex_init(&applog_lock, NULL);
 	pthread_mutex_init(&stats_lock, NULL);

