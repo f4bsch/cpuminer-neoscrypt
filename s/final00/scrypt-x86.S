@@ -31,7 +31,7 @@
 #endif
 
 #if defined(USE_ASM) && defined(__i386__) && !defined(NEOMIN)
-	
+#error "neoscrypt only"
 .macro scrypt_shuffle src, so, dest, do
 	movl	\so+60(\src), %eax
 	movl	\so+44(\src), %ebx

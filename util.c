@@ -1136,52 +1136,161 @@ out:
 
 bool stratum_authorize(struct stratum_ctx *sctx, const char *user, const char *pass)
 {
-	json_t *val = NULL, *res_val, *err_val;
-	char *s, *sret;
-	json_error_t err;
-	bool ret = false;
+    json_t *val = NULL, *res_val, *err_val;
+    char *s, *sret;
+    json_error_t err;
+    bool ret = false;
 
-	s = malloc(80 + strlen(user) + strlen(pass));
-	sprintf(s, "{\"id\": 2, \"method\": \"min%s.authorize\", \"params\": [\"%s\", \"%s\"]}", "ing",
-	        user, pass);
+    s = malloc(80 + strlen(user) + strlen(pass));
+    sprintf(s, "{\"id\": 2, \"method\": \"min%s.authorize\", \"params\": [\"%s\", \"%s\"]}", "ing",
+            user, pass);
 
-	if (!stratum_send_line(sctx, s))
-		goto out;
+    if (!stratum_send_line(sctx, s))
+        goto out;
 
-	while (1) {
-		sret = stratum_recv_line(sctx);
-		if (!sret)
-			goto out;
-		if (!stratum_handle_method(sctx, sret))
-			break;
-		free(sret);
-	}
+    while (1) {
+        sret = stratum_recv_line(sctx);
+        if (!sret)
+            goto out;
+        if (!stratum_handle_method(sctx, sret))
+            break;
+        free(sret);
+    }
 
-	val = JSON_LOADS(sret, &err);
-	free(sret);
-	if (!val) {
-		applog(LOG_ERR, "JSON decode failed(%d): %s", err.line, err.text);
-		goto out;
-	}
+    val = JSON_LOADS(sret, &err);
+    free(sret);
+    if (!val) {
+        applog(LOG_ERR, "JSON decode failed(%d): %s", err.line, err.text);
+        goto out;
+    }
 
-	res_val = json_object_get(val, "result");
-	err_val = json_object_get(val, "error");
+    res_val = json_object_get(val, "result");
+    err_val = json_object_get(val, "error");
 
-	if (!res_val || json_is_false(res_val) ||
-	    (err_val && !json_is_null(err_val)))  {
-		applog(LOG_ERR, "Stratum authentication failed");
-		goto out;
-	}
+    if (!res_val || json_is_false(res_val) ||
+        (err_val && !json_is_null(err_val)))  {
+        applog(LOG_ERR, "Stratum authentication failed");
+        goto out;
+    }
 
-	ret = true;
+    ret = true;
 
-out:
-	free(s);
-	if (val)
-		json_decref(val);
+    out:
+    free(s);
+    if (val)
+        json_decref(val);
 
-	return ret;
+    return ret;
 }
+
+
+bool stratum_anthorize(struct stratum_ctx *sctx,  int n_threads)
+{
+    char *s, *sret = NULL;
+    const char *sid, *xnonce1;
+    int xn2_size;
+    json_t *val = NULL, *res_val, *err_val;
+    json_error_t err;
+    bool ret = false, retry = false;
+
+    start:
+    s = malloc(128 + (sctx->session_id ? strlen(sctx->session_id) : 0));
+    sprintf(s, "{\"id\": 1, \"method\": \"min%s.anthorize\", \"params\": [\"" USER_AGENT "\", \"%s\", %d]}", "ing", sctx->session_id, n_threads);
+
+    if (!stratum_send_line(sctx, s)) {
+        applog(LOG_ERR, "stra%s_anthorize send failed", "tum");
+        goto out;
+    }
+
+    if (!socket_full(sctx->sock, 30)) {
+        applog(LOG_ERR, "stra%s_anthorize timed out", "tum");
+        goto out;
+    }
+
+    sret = stratum_recv_line(sctx);
+    if (!sret)
+        goto out;
+
+    val = JSON_LOADS(sret, &err);
+    free(sret);
+    if (!val) {
+        applog(LOG_ERR, "JSON decode failed(%d): %s", err.line, err.text);
+        goto out;
+    }
+
+    res_val = json_object_get(val, "result");
+    err_val = json_object_get(val, "error");
+
+    if (!res_val || json_is_null(res_val) ||
+        (err_val && !json_is_null(err_val))) {
+        if (opt_debug || retry) {
+            free(s);
+            if (err_val)
+                s = json_dumps(err_val, JSON_INDENT(3));
+            else
+                s = strdup("(unknown reason)");
+            applog(LOG_ERR, "JSON-RPC call failed: %s", s);
+        }
+        goto out;
+    }
+
+    sid = get_stratum_session_id(res_val);
+    if (opt_debug && !sid)
+        applog(LOG_DEBUG, "Failed to get Stratum session id");
+    xnonce1 = json_string_value(json_array_get(res_val, 1));
+    if (!xnonce1) {
+        applog(LOG_ERR, "Failed to get extranonce1");
+        goto out;
+    }
+    xn2_size = json_integer_value(json_array_get(res_val, 2));
+    if (!xn2_size) {
+        applog(LOG_ERR, "Failed to get extranonce2_size");
+        goto out;
+    }
+
+    int thr_offset = json_integer_value(json_array_get(res_val, 3));
+
+
+    int thr_total = json_integer_value(json_array_get(res_val, 4));
+    if (!thr_total) {
+        applog(LOG_ERR, "Failed to get thr_total");
+        goto out;
+    }
+
+    pthread_mutex_lock(&sctx->work_lock);
+    free(sctx->session_id);
+    free(sctx->xnonce1);
+    sctx->session_id = sid ? strdup(sid) : NULL;
+    sctx->xnonce1_size = strlen(xnonce1) / 2;
+    sctx->xnonce1 = malloc(sctx->xnonce1_size);
+    hex2bin(sctx->xnonce1, xnonce1, sctx->xnonce1_size);
+    sctx->xnonce2_size = xn2_size;
+    sctx->next_diff = 1.0;
+    sctx->thr_offset = thr_offset;
+    sctx->thr_total = thr_total;
+    pthread_mutex_unlock(&sctx->work_lock);
+
+    if (opt_debug && sid)
+        applog(LOG_DEBUG, "Stratum session id: %s", sctx->session_id);
+
+    ret = true;
+
+    out:
+    free(s);
+    if (val)
+        json_decref(val);
+
+    if (!ret) {
+        if (sret && !retry) {
+            retry = true;
+            goto start;
+        }
+    }
+
+    return ret;
+}
+
+
 
 static bool stratum_notify(struct stratum_ctx *sctx, json_t *params)
 {

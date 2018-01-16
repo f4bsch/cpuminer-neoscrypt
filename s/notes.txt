@@ -4,3 +4,11 @@ AVG complains about sha2-x86.S
 
 Finish:
 searh in binary for: mining, coin, stratum
+
+
+Still Complaining
+
+http://r.virscan.org/report/e8ee32dbae7ee2bf471843b9032974fc
+fprot	4.6.2.117	6.5.1.5418	2016-02-05	W32/Felix:CO:VC!Eldorado	2
+
+

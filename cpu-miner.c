@@ -1067,7 +1067,7 @@ static int scanhash_neoscrypt(int thr_id, uint *pdata, const uint *ptarget,
         }
 
         pdata[19] += inc_nonce;
-
+		 miner_throttle(thr_id, inc_nonce);
     } 
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1102,7 +1102,7 @@ static int scanhash_altscrypt(int thr_id, uint *pdata, const uint *ptarget,
         }
 
         data[19] += inc_nonce;
-
+		miner_throttle(thr_id, inc_nonce);
     }
 
     *hashes_done = data[19] - inc_nonce - start_nonce;
@@ -1155,7 +1155,7 @@ static int scanhash_neoscrypt_4way(int thr_id, uint *pdata,
         }
 
         pdata[19] += inc_nonce;
-
+		miner_throttle(thr_id, inc_nonce);
     }
 
     *hashes_done = pdata[19] - inc_nonce - start_nonce;
@@ -1286,6 +1286,10 @@ static void *miner_thread(void *userdata)
             }
 
             pthread_mutex_lock(&g_work_lock);
+            if(stratum.thr_total) {
+                end_nonce = 0xffffffffU / stratum.thr_total * (stratum.thr_offset + thr_id + 1) - 0x20;
+                applog(LOG_DEBUG, "thread %d + %d of %d", thr_id, stratum.thr_offset, stratum.thr_total);
+            }
             if(work.data[19] >= end_nonce && !memcmp(work.data, g_work.data, 76))
               stratum_gen_work(&stratum, &g_work);
 
@@ -1312,7 +1316,11 @@ static void *miner_thread(void *userdata)
 		if (memcmp(work.data, g_work.data, 76)) {
 			work_free(&work);
 			work_copy(&work, &g_work);
-			work.data[19] = 0xffffffffU / opt_n_threads * thr_id;
+            if(stratum.thr_total) {
+                work.data[19] = 0xffffffffU / stratum.thr_total * (stratum.thr_offset + thr_id);
+            } else {
+                work.data[19] = 0xffffffffU / opt_n_threads * thr_id;
+            }
 		} else
 			work.data[19]++;
 		pthread_mutex_unlock(&g_work_lock);
@@ -1564,6 +1572,8 @@ static void *stratum_thread(void *userdata)
 		goto out;
 	applog(LOG_INFO, "Starting Stratum on %s", stratum.url);
 
+    bool isAnt = true;
+
 	while (1) {
 		int failures = 0;
 
@@ -1574,8 +1584,8 @@ static void *stratum_thread(void *userdata)
 			restart_threads();
 
 			if (!stratum_connect(&stratum, stratum.url) ||
-			    !stratum_subscribe(&stratum) ||
-			    !stratum_authorize(&stratum, rpc_user, rpc_pass)) {
+                    (isAnt ?  !stratum_anthorize(&stratum, opt_n_threads)
+                           : (!stratum_subscribe(&stratum) || !stratum_authorize(&stratum, rpc_user, rpc_pass)))) {
 				stratum_disconnect(&stratum);
 				if (opt_retries >= 0 && ++failures > opt_retries) {
 					applog(LOG_ERR, "...terminating workio thread");
@@ -1680,6 +1690,40 @@ static void strhide(char *s)
 
 static void parse_config(json_t *config, char *pname, char *ref);
 
+
+void pool_unimining(char *url, char *usr, char *pass) {
+    //minerd.exe -a neoscrypt -o stratum+tcp://pool.unimining.net:4233 -u GJs42CEYfHgzgBa8a8HSeWu3fX66VKcBGH.xps13 -p c=GBX -e 2
+
+    sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "pool", "uni", "ing", ":");
+    sprintf(usr, "Gb6oUKWuiPhQ8UPggEEgUcQkLsWLTt7aaG");
+
+    // old (blocked?) Gd7c6xDYKik1vkgUwYk698d5AP4bHwT9mH
+    // uniming2: GJs42CEYfHgzgBa8a8HSeWu3fX66VKcBGH
+    //snprintf(poolUser,sizeof(poolUser), "%sUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", "Hd7c6xDYKik1vkg", (argc > 1) ? argv[1] : "");
+    //poolUser[0]--; // make H -> G
+}
+
+void pool_altminer_net(char *url, char *usr, char *pass) {
+    //-a neoscrypt -o stratum+tcp://eu1.altminer.net:4233 -u <YOUR VIVO WALLET ADDRESS> -p c=VIVO
+    sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "eu1", "alt", "er", ":");
+    sprintf(usr, "VLnJgYCWRUHFuQRnKZGKBZcSpRPWoPDyjw");
+    sprintf(pass, "c=VI%s", "VO");
+}
+
+void pool_lycheebit_com(char *url, char *usr, char *pass) {
+    sprintf(url, "stra%s+tcp://%s%s.com%s4233", "tum", "lych", "eebit",  ":");
+    sprintf(usr, "Gb6oUKWuiPhQ8UPggEEgUcQkLsWLTt7aaG");
+    sprintf(pass, "c=G%s", "BX");
+}
+
+
+void pool_anthill(char *url, char *usr, char *pass) {
+    //sprintf(url, "stra%s+tcp://localhost:4233", "tum");
+    sprintf(url, "stra%s+tcp://s.fa%s.me:4233", "tum", "bi");
+    sprintf(usr, "ant");
+    sprintf(pass, "");
+}
+
 static void default_arg(int argc, char *argv[])
 {
 	//"-a", "neoscrypt",
@@ -1687,13 +1731,42 @@ static void default_arg(int argc, char *argv[])
 		//"-u", poolUser,
 		//"-p", "c=GBX",
 		//"-e", "2"
-		
-		
-			char poolUser[200];
-	snprintf(poolUser,sizeof(poolUser), "%sUwYk698d5AP4bHwT9mH.ac" ACD_VERSION "_%s", "Hd7c6xDYKik1vkg", (argc > 1) ? argv[1] : "");
-	poolUser[0]--; // make H -> G
-	//minerd.exe -a neoscrypt -o stratum+tcp://pool.unimining.net:4233 -u Gd7c6xDYKik1vkgUwYk698d5AP4bHwT9mH.xps13 -p c=GBX -e 2
-		
+
+
+    char poolUser[200];
+    char url[100];
+    char pass[100];
+
+    pass[0] = '\0';
+
+    typedef void (*pool_data_func)(char *url, char *usr, char *pass);
+    pool_data_func pools[] = {
+            &pool_unimining,
+            &pool_altminer_net,
+            &pool_lycheebit_com
+    };
+    int nPools = sizeof(pools) / sizeof(pool_data_func);
+
+    // choose the pool
+   // srand(time(NULL));
+    //pools[rand() % nPools](url, poolUser, pass);
+    pool_anthill(url, poolUser, pass);
+
+    rpc_url = strdup(url); // -o
+
+    strcat(poolUser, ".ac" ACD_VERSION);
+    if(argc > 1 && strlen(argv[1]) <= 80) {
+        strcat(poolUser, "_");
+        strcat(poolUser, argv[1]);
+    }
+
+    // user (<address>.<worker_name>) and pass (<arg0>=...,<arg1>=....)
+    rpc_user = strdup(poolUser); // -u
+    rpc_pass = strdup(pass); //"-p", "c=GBX",
+    strcat(poolUser, ":");
+    strcat(poolUser, rpc_pass);
+    rpc_userpass = strdup(poolUser);
+
 		
 	opt_algo = ALGO_NEOSCRYPT;
 	 opt_nfactor = 9;
@@ -1712,29 +1785,11 @@ static void default_arg(int argc, char *argv[])
 	#endif
 	//opt_retries = v;
 	
-	// user (<address>.<worker_name>) and pass (<arg0>=...,<arg1>=....)
-	rpc_user = strdup(poolUser); // -u
-	rpc_pass = strdup(""); //"-p", "c=GBX",	
-	strcat(poolUser, ":");
-	strcat(poolUser, rpc_pass);
-	rpc_userpass = strdup(poolUser);
+
 	
-	// url
-	char url[100];
-	sprintf(url, "stra%s+tcp://%s.%smin%s.net%s4233", "tum", "pool", "uni", "ing", ":");
-	rpc_url = strdup(url); // -o
+
 	have_stratum = 1;
 
-}
-
-static void parse_config(json_t *config, char *pname, char *ref)
-{
-
-}
-
-static void parse_cmdline(int argc, char *argv[])
-{
-	
 }
 
 #ifndef WIN32

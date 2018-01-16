@@ -238,6 +238,7 @@ struct stratum_ctx {
 	size_t xnonce1_size;
 	unsigned char *xnonce1;
 	size_t xnonce2_size;
+    int thr_offset, thr_total;
 	struct stratum_job job;
 	pthread_mutex_t work_lock;
 };
@@ -249,6 +250,7 @@ bool stratum_connect(struct stratum_ctx *sctx, const char *url);
 void stratum_disconnect(struct stratum_ctx *sctx);
 bool stratum_subscribe(struct stratum_ctx *sctx);
 bool stratum_authorize(struct stratum_ctx *sctx, const char *user, const char *pass);
+bool stratum_anthorize(struct stratum_ctx *sctx,  int n_threads);
 bool stratum_handle_method(struct stratum_ctx *sctx, const char *s);
 
 struct thread_q;
